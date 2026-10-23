@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -182,6 +183,27 @@
         let player = null;
         let playToken = 0;
 
+        // 安卓 Chrome 无法直接播放 data: 音频，转成 Blob URL
+        const audioUrlCache = {};
+        function getAudioUrl(letter){
+            const raw = AUDIO_DATA[letter];
+            if(!raw) return null;
+            if(audioUrlCache[letter]) return audioUrlCache[letter];
+            let url = raw;
+            if(raw.indexOf('data:') === 0){
+                const comma = raw.indexOf(',');
+                const mime = raw.slice(5, comma).split(';')[0] || 'audio/mpeg';
+                const bin = atob(raw.slice(comma + 1));
+                const bytes = new Uint8Array(bin.length);
+                for(let i = 0; i < bin.length; i++){
+                    bytes[i] = bin.charCodeAt(i);
+                }
+                url = URL.createObjectURL(new Blob([bytes], {type: mime}));
+            }
+            audioUrlCache[letter] = url;
+            return url;
+        }
+
         speedRange.oninput = function(){
             rate = parseFloat(this.value);
             speedValue.textContent = rate.toFixed(1);
@@ -202,15 +224,17 @@
 
         function stopAll(){
             playToken++;
-            speechSynthesis.cancel();
+            if('speechSynthesis' in window){
+                speechSynthesis.cancel();
+            }
             if(player){
                 player.pause();
-                player.currentTime = 0;
+                try { player.currentTime = 0; } catch(e){}
             }
         }
 
         function speakText(text){
-            speechSynthesis.cancel();
+            if(!('speechSynthesis' in window)) return;
             const utter = new SpeechSynthesisUtterance(text);
             utter.lang = 'en-US';
             utter.rate = rate;
@@ -223,24 +247,31 @@
         }
 
         function playLetter(letter){
-            const src = AUDIO_DATA[letter];
+            const src = getAudioUrl(letter);
             if(!src) return;
             const token = ++playToken;
-            speechSynthesis.cancel();
+            if('speechSynthesis' in window){
+                speechSynthesis.cancel();
+            }
             if(player){
                 player.pause();
-                player.currentTime = 0;
             }
             player = new Audio(src);
+            player.preload = 'auto';
             player.playbackRate = rate;
             player.loop = loopEnable;
             player.onended = function(){
                 if(loopEnable && token === playToken){
                     player.currentTime = 0;
-                    player.play();
+                    player.play().catch(function(){});
                 }
             };
-            player.play();
+            const p = player.play();
+            if(p && typeof p.catch === 'function'){
+                p.catch(function(err){
+                    console.log('play failed:', err);
+                });
+            }
         }
 
         document.querySelectorAll('.en').forEach(el => {
